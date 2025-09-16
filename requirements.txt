@@ -1,0 +1,64 @@
+audioread==3.0.1
+av==15.1.0
+brotlicffi @ file:///C:/b/abs_f4lixvzmxt/croot/brotlicffi_1736183286104/work
+certifi @ file:///C:/b/abs_2bz30lzohz/croot/certifi_1754570654565/work/certifi
+cffi @ file:///C:/b/abs_29_b57if3f/croot/cffi_1736184144340/work
+charset-normalizer @ file:///croot/charset-normalizer_1721748349566/work
+colorama @ file:///home/conda/feedstock_root/build_artifacts/colorama_1733218098505/work
+coloredlogs==15.0.1
+ctranslate2==4.6.0
+customtkinter==5.2.2
+darkdetect==0.8.0
+decorator @ file:///home/conda/feedstock_root/build_artifacts/decorator_1740384970518/work
+faster-whisper==1.2.0
+filelock @ file:///C:/b/abs_758187j281/croot/filelock_1744281404850/work
+flatbuffers==25.2.10
+fsspec==2025.7.0
+gmpy2 @ file:///C:/b/abs_d8ki0o0h97/croot/gmpy2_1738085498525/work
+huggingface-hub==0.34.4
+humanfriendly==10.0
+idna @ file:///C:/b/abs_aad84bnnw5/croot/idna_1714398896795/work
+imageio @ file:///home/conda/feedstock_root/build_artifacts/imageio_1738273805233/work
+imageio-ffmpeg @ file:///home/conda/feedstock_root/build_artifacts/imageio-ffmpeg_1737102630951/work
+Jinja2 @ file:///C:/b/abs_920kup4e6u/croot/jinja2_1741711580669/work
+joblib==1.5.2
+lazy_loader==0.4
+librosa==0.11.0
+llvmlite==0.44.0
+MarkupSafe @ file:///C:/b/abs_a0ma7ge0jc/croot/markupsafe_1738584052792/work
+mkl-service==2.4.0
+mkl_fft @ file:///C:/Users/dev-admin/mkl/mkl_fft_1730823082242/work
+mkl_random @ file:///C:/Users/dev-admin/mkl/mkl_random_1730822522280/work
+moviepy @ file:///home/conda/feedstock_root/build_artifacts/moviepy_1665160419595/work
+mpmath @ file:///C:/b/abs_7833jrbiox/croot/mpmath_1690848321154/work
+msgpack==1.1.1
+networkx @ file:///C:/b/abs_b054htfn9t/croot/networkx_1737043671910/work
+numba==0.61.2
+numpy @ file:///C:/b/abs_0123vcxhf8/croot/numpy_and_numpy_base_1725470331966/work/dist/numpy-2.0.1-cp310-cp310-win_amd64.whl#sha256=e824ec3b279f4c5207736c83ac2f2dc79b489e08501a4ea9e3fc178c45db289b
+onnxruntime==1.22.1
+packaging==25.0
+Pillow==9.5.0
+platformdirs==4.4.0
+pooch==1.8.2
+proglog @ file:///home/conda/feedstock_root/build_artifacts/proglog_1728452852274/work
+protobuf==6.32.0
+pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
+pyreadline3==3.5.4
+PySocks @ file:///C:/ci_310/pysocks_1642089375450/work
+python-dotenv==1.1.1
+PyYAML @ file:///C:/b/abs_14xkfs39bx/croot/pyyaml_1728657968772/work
+requests @ file:///C:/b/abs_0b3h9d_724/croot/requests_1750426345668/work
+scikit-learn==1.7.1
+scipy==1.15.3
+soundfile==0.13.1
+soxr==0.5.0.post1
+sympy @ file:///C:/b/abs_b4u17p23yg/croot/sympy_1738108511395/work
+threadpoolctl==3.6.0
+tokenizers==0.22.0
+torch==2.5.1
+torchaudio==2.5.1
+torchvision==0.20.1
+tqdm @ file:///home/conda/feedstock_root/build_artifacts/tqdm_1735661334605/work
+typing_extensions @ file:///C:/b/abs_ecq8gc0vbm/croot/typing_extensions_1756281142218/work
+urllib3 @ file:///C:/b/abs_393g1ayee_/croot/urllib3_1750775481226/work
+win-inet-pton @ file:///C:/ci_310/win_inet_pton_1642658466512/work
