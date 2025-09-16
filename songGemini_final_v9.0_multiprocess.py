@@ -3,12 +3,14 @@
 # 1. Исправлена последняя ошибка NameError с messagebox при завершении работы.
 # 2. Сохранена вся рабочая логика многопоточного рендера и нового GUI.
 
-import os, re, random, tempfile, subprocess, json, hashlib, threading, itertools
+import os, re, random, tempfile, subprocess, json, hashlib, threading, itertools, logging
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Set
 from difflib import SequenceMatcher
 from multiprocessing import Pool, cpu_count
 import shutil
+
+logger = logging.getLogger(__name__)
 
 import numpy as np, librosa
 from faster_whisper import WhisperModel
@@ -388,31 +390,56 @@ def render_segment_task(task_args):
     out_path = os.path.join(temp_dir, f"segment_{task['start']:08.3f}.mp4")
     clip = None
 
+    def render_error_clip():
+        try:
+            err_clip = TextClip(
+                f"ERROR Task {task['id']}",
+                fontsize=50,
+                color='red',
+                size=FINAL_RES,
+            ).set_duration(task['end'] - task['start'])
+            try:
+                err_clip.write_videofile(out_path, fps=FPS, codec="libx264", audio=False, preset="ultrafast", logger=None)
+                return out_path
+            except Exception:
+                logger.exception("Не удалось записать аварийный клип для задачи %s (%s)", task_id, task_type)
+                return None
+            finally:
+                try:
+                    err_clip.close()
+                except Exception:
+                    logger.exception("Ошибка при закрытии аварийного клипа для задачи %s (%s)", task_id, task_type)
+        except Exception:
+            logger.exception("Не удалось создать аварийный клип для задачи %s (%s)", task_id, task_type)
+            return None
+
     try:
         if task_type == 'hero':
             it = next(i for i in params['intervals'] if i.idx == task['idx'])
             line = task['line']
             wslice = [w for w in params['hyp_words'] if it.start-0.05 <= w.start <= it.end+0.05]
             clip, _ = make_segment(line, wslice, it.start, it.end, params['beats'], params)
-        
+
         elif task_type == 'gap':
             clip = montage_for_range(task['start'], task['end'], params, exclude=task.get('exclude'))
 
         if clip:
-            clip.write_videofile(out_path, fps=FPS, codec="libx264", audio=False, preset="ultrafast", logger=None)
-            clip.close()
-            print(f"  [Поток {os.getpid()}] Задача {task_id} ({task_type}) завершена.")
-            return out_path
+            try:
+                clip.write_videofile(out_path, fps=FPS, codec="libx264", audio=False, preset="ultrafast", logger=None)
+                print(f"  [Поток {os.getpid()}] Задача {task_id} ({task_type}) завершена.")
+                return out_path
+            except Exception:
+                logger.exception("Не удалось записать клип для задачи %s (%s)", task_id, task_type)
+                return render_error_clip()
+            finally:
+                try:
+                    clip.close()
+                except Exception:
+                    logger.exception("Ошибка при закрытии клипа для задачи %s (%s)", task_id, task_type)
     except Exception:
-        import traceback
-        traceback.print_exc()
-        try:
-            err_clip = TextClip(f"ERROR Task {task['id']}", fontsize=50, color='red', size=FINAL_RES).set_duration(task['end'] - task['start'])
-            err_clip.write_videofile(out_path, fps=FPS, codec="libx264", audio=False, preset="ultrafast", logger=None)
-            err_clip.close()
-            return out_path
-        except: return None
-            
+        logger.exception("Ошибка при рендере задачи %s (%s)", task_id, task_type)
+        return render_error_clip()
+
     return None
 
 def build_video(params, app_instance):
