@@ -1,3 +1,15 @@
+# среды и кеш
 venv/
 __pycache__/
 *.pyc
+
+# временные/выходные
+temp_montage/
+output/
+input/
+*.log
+
+# ярлыки/служебные
+*.lnk
+.DS_Store
+Thumbs.db
