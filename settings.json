@@ -1,0 +1,15 @@
+{
+    "audio_path_var": "F:/=Youtube=/15.1 Brainrot Song/input/audio",
+    "path_mode": "folder",
+    "heroes_root": "F:/=Youtube=/15.1 Brainrot Song/heroes",
+    "output_dir": "F:/=Youtube=/15.1 Brainrot Song/output",
+    "style": "Rap",
+    "asr_model": "medium",
+    "video_count": "20",
+    "beat_step_range": "2-4",
+    "min_shot": "0.25",
+    "sub_fontsize": "90",
+    "color_base_hex": "#FFFFFF",
+    "color_active_hex": "#FFEB3B",
+    "num_threads": "8"
+}
