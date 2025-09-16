@@ -30,6 +30,7 @@ from moviepy.editor import (
     VideoFileClip, AudioFileClip, ImageClip,
     CompositeVideoClip, concatenate_videoclips, vfx, ColorClip, TextClip
 )
+
 from PIL import Image, ImageDraw, ImageFont
 
 import customtkinter as ctk
