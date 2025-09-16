@@ -4,6 +4,7 @@
 # 2. Сохранена вся рабочая логика многопоточного рендера и нового GUI.
 
 import os, re, random, tempfile, subprocess, json, hashlib, threading, itertools, logging
+from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Set
 from difflib import SequenceMatcher
@@ -442,6 +443,20 @@ def render_segment_task(task_args):
             
     return None
 
+def _probe_nb_frames(video_path: Path) -> Optional[int]:
+    cmd = [
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-count_frames", "-show_entries", "stream=nb_read_frames",
+        "-of", "default=nokey=1:noprint_wrappers=1", str(video_path)
+    ]
+    try:
+        result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        value = result.stdout.strip()
+        return int(value) if value else None
+    except Exception as exc:
+        logger.warning("Не удалось получить количество кадров для %s: %s", video_path, exc)
+        return None
+
 def build_video(params, app_instance):
     audio_path = params['audio_path']; out_path = params['out_path']
     app_instance.after(0, app_instance.update_status, "Анализ аудио (ASR)...")
@@ -492,20 +507,36 @@ def build_video(params, app_instance):
 
     app_instance.after(0, app_instance.update_status, "Финальная склейка...")
     
-    sorted_files = [temp_files_map[key] for key in sorted(temp_files_map.keys())]
+    sorted_files = [Path(temp_files_map[key]) for key in sorted(temp_files_map.keys())]
     if not sorted_files:
         raise RuntimeError("Ни один сегмент не был успешно отрендерен.")
 
-    list_file_path = os.path.join(temp_dir, "filelist.txt")
-    with open(list_file_path, "w", encoding='utf-8') as f:
-        for path in sorted_files:
-             f.write(f"file '{path.replace(os.sep, '/')}'\n")
+    filtered_files = []
+    filtered_count = 0
+    for path in sorted_files:
+        nb_frames = _probe_nb_frames(path)
+        if nb_frames is not None and nb_frames < 3:
+            filtered_count += 1
+            logger.info("Пропускаю сегмент %s из-за малого количества кадров (%s)", path.name, nb_frames)
+            continue
+        filtered_files.append(path)
+
+    logger.info("Сегментов для склейки: %s (отфильтровано: %s)", len(sorted_files), filtered_count)
+
+    if not filtered_files:
+        raise RuntimeError("Все сегменты отклонены из-за малого количества кадров.")
+
+    list_file_path = Path(temp_dir) / "filelist.txt"
+    with list_file_path.open("w", encoding='utf-8') as f:
+        for path in filtered_files:
+            f.write(f"file '{path.as_posix()}'\n")
 
     ffmpeg_cmd = [
-        'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_file_path,
-        '-i', audio_path, '-c:v', 'h264_nvenc', '-preset', 'slow', '-cq', '21',
-        '-c:a', 'aac', '-b:a', '192k', '-pix_fmt', 'yuv420p',
-        '-t', str(total_dur), out_path
+        'ffmpeg', '-y', '-safe', '0', '-fflags', '+genpts',
+        '-f', 'concat', '-i', str(list_file_path), '-i', str(audio_path),
+        '-r', '30', '-c:v', 'libx264', '-preset', 'slow', '-crf', '21',
+        '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k',
+        '-shortest', '-movflags', '+faststart', str(out_path)
     ]
     subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
