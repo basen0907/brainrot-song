@@ -422,9 +422,10 @@ def build_video(params, app_instance):
     app_instance.after(0, app_instance.update_status, "Анализ ритма...")
     beats = detect_beats(audio_path)
     app_instance.after(0, app_instance.update_status, "Подготовка задач для рендера...")
-    audio = AudioFileClip(audio_path)
+    with AudioFileClip(str(audio_path)) as audio:
+        audio_duration = audio.duration
     last_segment_end_time = max((it.end for it in intervals if find_hero_folder(LYRICS[it.idx])), default=0)
-    total_dur = max(last_segment_end_time, audio.duration)
+    total_dur = max(last_segment_end_time, audio_duration)
     
     tasks = []
     hero_intervals = [it for it in intervals if find_hero_folder(LYRICS[it.idx])]
