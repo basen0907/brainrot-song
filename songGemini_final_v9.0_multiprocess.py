@@ -4,6 +4,7 @@
 # 2. Сохранена вся рабочая логика многопоточного рендера и нового GUI.
 
 import os, re, random, tempfile, subprocess, json, hashlib, threading, itertools
+from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Set
 from difflib import SequenceMatcher
@@ -259,23 +260,32 @@ def make_karaoke_overlays(line_text, words, st, en, sub_fontsize, color_base, co
 def cover_resize(clip: VideoFileClip, size: tuple) -> VideoFileClip:
     W,H = size; scale = max(W/clip.w, H/clip.h); clip = clip.fx(vfx.resize, scale); return clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=W, height=H)
 def list_video_files(folder):
-    if not os.path.isdir(folder): return []
-    return [os.path.join(folder,f) for f in os.listdir(folder) if f.lower().endswith((".mp4",".mov",".mkv",".webm"))]
+    if not folder: return []
+    folder_path = Path(folder)
+    if not folder_path.is_dir(): return []
+    return [str(p) for p in folder_path.iterdir() if p.is_file() and p.suffix.lower() in (".mp4", ".mov", ".mkv", ".webm")]
 def _find_style(hero_dir, style):
-    if not os.path.isdir(hero_dir): return None
-    for d in os.listdir(hero_dir):
-        p=os.path.join(hero_dir,d)
-        if os.path.isdir(p) and d.lower()==style.lower(): return p
+    hero_path = Path(hero_dir)
+    if not hero_path.is_dir(): return None
+    style_lower = style.lower()
+    for child in hero_path.iterdir():
+        if child.is_dir() and child.name.lower()==style_lower: return str(child)
     return None
 def collect_pool(heroes_root, style=None, exclude:Optional[Set[str]]=None):
+    heroes_root_path = Path(heroes_root)
     files=[]
     for hero in HERO_ALIASES.keys():
-        hero_dir=os.path.join(heroes_root, hero)
+        hero_dir=heroes_root_path/hero
         sdir=_find_style(hero_dir, style) if style else None
         files+=list_video_files(sdir) if sdir else list_video_files(hero_dir)
-    files=[f for f in files if os.path.isfile(f)]
-    if exclude: files=[f for f in files if f not in exclude]
-    return files
+    exclude_paths={Path(p) for p in exclude} if exclude else set()
+    valid=[]
+    for f in files:
+        fp=Path(f)
+        if not fp.is_file(): continue
+        if exclude_paths and fp in exclude_paths: continue
+        valid.append(str(fp))
+    return valid
 def pick_clip_by_duration(heroes_root, hero_folder, style, target_dur):
     hero_dir=os.path.join(heroes_root, hero_folder)
     style_dir=_find_style(hero_dir, style) if style else None
@@ -416,13 +426,13 @@ def render_segment_task(task_args):
     return None
 
 def build_video(params, app_instance):
-    audio_path = params['audio_path']; out_path = params['out_path']
+    audio_path = Path(params['audio_path']); out_path = Path(params['out_path'])
     app_instance.after(0, app_instance.update_status, "Анализ аудио (ASR)...")
-    intervals, hyp_words = intervals_by_lines(audio_path, LYRICS, params['asr_model'])
+    intervals, hyp_words = intervals_by_lines(str(audio_path), LYRICS, params['asr_model'])
     app_instance.after(0, app_instance.update_status, "Анализ ритма...")
-    beats = detect_beats(audio_path)
+    beats = detect_beats(str(audio_path))
     app_instance.after(0, app_instance.update_status, "Подготовка задач для рендера...")
-    audio = AudioFileClip(audio_path)
+    audio = AudioFileClip(str(audio_path))
     last_segment_end_time = max((it.end for it in intervals if find_hero_folder(LYRICS[it.idx])), default=0)
     total_dur = max(last_segment_end_time, audio.duration)
     
@@ -442,14 +452,14 @@ def build_video(params, app_instance):
     
     tasks.sort(key=lambda x: x['start'])
     
-    temp_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "temp_montage")
-    if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
-    os.makedirs(temp_dir, exist_ok=True)
+    temp_dir = Path(__file__).resolve().parent / "temp_montage"
+    if temp_dir.exists(): shutil.rmtree(temp_dir)
+    temp_dir.mkdir(parents=True, exist_ok=True)
     print(f"Временные файлы будут создаваться в: {temp_dir}")
 
     params['intervals'] = intervals; params['hyp_words'] = hyp_words; params['beats'] = beats
     params['lyrics_data'] = {'lyrics': LYRICS, 'aliases': HERO_ALIASES}
-    task_args = [(task, params, temp_dir) for task in tasks]
+    task_args = [(task, params, str(temp_dir)) for task in tasks]
     
     app_instance.after(0, app_instance.update_status, f"Рендер {len(tasks)} сегментов в {params['num_threads']} потоков...")
     
@@ -457,7 +467,7 @@ def build_video(params, app_instance):
     with Pool(processes=params['num_threads']) as pool:
         for i, result_path in enumerate(pool.imap_unordered(render_segment_task, task_args)):
             if result_path:
-                start_time = float(os.path.basename(result_path).split('_')[1].replace('.mp4',''))
+                start_time = float(Path(result_path).name.split('_')[1].replace('.mp4',''))
                 temp_files_map[start_time] = result_path
             progress = int((i + 1) / len(task_args) * 100)
             app_instance.after(0, app_instance.update_progress, progress)
@@ -468,16 +478,16 @@ def build_video(params, app_instance):
     if not sorted_files:
         raise RuntimeError("Ни один сегмент не был успешно отрендерен.")
 
-    list_file_path = os.path.join(temp_dir, "filelist.txt")
+    list_file_path = temp_dir/"filelist.txt"
     with open(list_file_path, "w", encoding='utf-8') as f:
         for path in sorted_files:
-             f.write(f"file '{path.replace(os.sep, '/')}'\n")
+             f.write(f"file '{Path(path).as_posix()}'\n")
 
     ffmpeg_cmd = [
-        'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_file_path,
-        '-i', audio_path, '-c:v', 'h264_nvenc', '-preset', 'slow', '-cq', '21',
+        'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', str(list_file_path),
+        '-i', str(audio_path), '-c:v', 'h264_nvenc', '-preset', 'slow', '-cq', '21',
         '-c:a', 'aac', '-b:a', '192k', '-pix_fmt', 'yuv420p',
-        '-t', str(total_dur), out_path
+        '-t', str(total_dur), str(out_path)
     ]
     subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
@@ -640,26 +650,27 @@ class App(ctk.CTk):
         self.after(0, self._toggle_ui, False)
         total_tasks = len(tasks)
         print("\n" + "="*50 + f"\nНАЧИНАЮ РАБОТУ: {total_tasks} видео в очереди.\n" + "="*50 + "\n")
-        
+
         for i, task in enumerate(tasks):
-            print(f"\n--- Видео {i+1}/{total_tasks} (Файл: {os.path.basename(task['audio_path'])}, Стиль: {task['style']}) ---\n")
-            self.after(0, self.update_status, f"Видео {i+1}/{total_tasks}: {os.path.basename(task['audio_path'])} ({task['style']})")
+            audio_path = Path(task['audio_path'])
+            print(f"\n--- Видео {i+1}/{total_tasks} (Файл: {audio_path.name}, Стиль: {task['style']}) ---\n")
+            self.after(0, self.update_status, f"Видео {i+1}/{total_tasks}: {audio_path.name} ({task['style']})")
             self.after(0, self.update_progress, 0)
             try:
                 task_params = params.copy()
-                task_params['audio_path'] = task['audio_path']
+                task_params['audio_path'] = str(audio_path)
                 task_params['style'] = task['style']
-                audio_basename = os.path.splitext(os.path.basename(task['audio_path']))[0]
-                output_folder = os.path.join(params['output_dir'], task['style'])
-                os.makedirs(output_folder, exist_ok=True)
+                audio_basename = audio_path.stem
+                output_folder = Path(params['output_dir']) / task['style']
+                output_folder.mkdir(parents=True, exist_ok=True)
                 file_index = 1
                 while True:
                     file_suffix = f"_{file_index}"
                     output_filename = f"{audio_basename}_{task['style']}{file_suffix}.mp4"
-                    out_path = os.path.join(output_folder, output_filename)
-                    if not os.path.exists(out_path): break
+                    out_path = output_folder / output_filename
+                    if not out_path.exists(): break
                     file_index += 1
-                task_params['out_path'] = out_path
+                task_params['out_path'] = str(out_path)
                 build_video(task_params, self)
             except Exception as e:
                 import traceback
