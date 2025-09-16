@@ -3,12 +3,26 @@
 # 1. Исправлена последняя ошибка NameError с messagebox при завершении работы.
 # 2. Сохранена вся рабочая логика многопоточного рендера и нового GUI.
 
-import os, re, random, tempfile, subprocess, json, hashlib, threading, itertools
+import os, re, random, tempfile, subprocess, json, hashlib, threading, itertools, logging
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Set
 from difflib import SequenceMatcher
 from multiprocessing import Pool, cpu_count
 import shutil
+
+LOG_FILE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "run.log")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE, encoding="utf-8"),
+        logging.StreamHandler()
+    ],
+    force=True,
+)
+
+logger = logging.getLogger(__name__)
 
 import numpy as np, librosa
 from faster_whisper import WhisperModel
@@ -91,10 +105,10 @@ def transcribe_words(audio_path:str, model_name: str)->List[Word]:
     cf=_cache_file(audio_path, model_name)
     if os.path.exists(cf):
         with open(cf,"r",encoding="utf-8") as f: data=json.load(f)
-        print("[ASR] из кэша:", os.path.basename(cf))
+        logger.info("[ASR] из кэша: %s", os.path.basename(cf))
         return [Word(d["text"], float(d["start"]), float(d["end"])) for d in data]
     clean = make_vocals_only(audio_path)
-    print(f"[ASR] распознаю (Whisper {model_name}, GPU)...")
+    logger.info("[ASR] распознаю (Whisper %s, GPU)...", model_name)
     model = WhisperModel(model_name, device="cuda", compute_type="float16")
     initial = " ".join([re.sub(r"\s+"," ", re.sub(r'\[.*?\]|\(.*?\)','', l)).strip() for l in LYRICS if l.strip()])
     segs, _ = model.transcribe(clean, word_timestamps=True, vad_filter=False, temperature=0.0, best_of=1, beam_size=5, condition_on_previous_text=True, compression_ratio_threshold=2.6, initial_prompt=initial)
@@ -104,7 +118,7 @@ def transcribe_words(audio_path:str, model_name: str)->List[Word]:
             t=norm_word(w.word)
             if t: out.append(Word(t, float(w.start), float(w.end)))
     with open(cf,"w",encoding="utf-8") as f: json.dump([w.__dict__ for w in out], f, ensure_ascii=False)
-    print(f"[ASR] слов: {len(out)}")
+    logger.info("[ASR] слов: %s", len(out))
     return out
 
 def word_sim(a:str,b:str)->float:
@@ -173,7 +187,7 @@ def intervals_by_lines(audio_path:str, lyrics_lines:List[str], model_name:str)->
             if li in per_st: st,en,h=per_st[li],per_en[li],per_hits.get(li,0)
             else: st,en,h=0.0,0.12,0
             intervals.append(LineInterval(li, st, max(en, st+0.12), h))
-        print("[ALIGN] DP-выравнивание по словам.")
+        logger.info("[ALIGN] DP-выравнивание по словам.")
     else:
         anchors = hero_anchor_times(hyp_words); last_t=0.0
         for k,li in enumerate(useful):
@@ -182,7 +196,7 @@ def intervals_by_lines(audio_path:str, lyrics_lines:List[str], model_name:str)->
                 nline = lyrics_lines[useful[k+1]]; nkey  = next((a for a in line_tokens(nline) if a in ANCHOR_TOKENS), None); next_st = anchors.get(nkey, None)
             en = next_st if next_st and next_st>st else st+1.8
             intervals.append(LineInterval(li, st, max(en, st+0.12), 0)); last_t = en
-        print("[ALIGN] Якорный режим.")
+        logger.info("[ALIGN] Якорный режим.")
     intervals.sort(key=lambda x:x.start)
     for i in range(1,len(intervals)):
         if intervals[i].start < intervals[i-1].end: intervals[i].start = intervals[i-1].end
@@ -352,14 +366,18 @@ def compute_gaps(intervals: List[LineInterval], total_dur: float) -> List[Tuple[
 def montage_for_range(start_time, end_time, params, exclude:Optional[Set[str]]=None):
     dur = end_time - start_time
     if dur <= 0.05: return None
-    print(f"[BUILD] Создание нарезки для промежутка [{start_time:.2f} - {end_time:.2f}]...")
+    logger.info(
+        "[BUILD] Создание нарезки для промежутка [%0.2f - %0.2f]...",
+        start_time,
+        end_time,
+    )
     local_beats = [b for b in params['beats'] if start_time <= b <= end_time]
     current_beat_step = get_beat_step(params['beat_step_range'])
     cut_points = [start_time] + thin_beats(local_beats, current_beat_step * 2, params['min_shot'] * 1.5) + [end_time]
     cut_points = sorted(list(set(cut_points)))
     pool = collect_pool(params['heroes_root'], params['style'], exclude=exclude)
     if not pool:
-        print(f"[WARN] Нет клипов для создания нарезки. Промежуток будет черным.")
+        logger.warning("[WARN] Нет клипов для создания нарезки. Промежуток будет черным.")
         return ColorClip(size=FINAL_RES, color=(0,0,0)).set_duration(dur)
     random.shuffle(pool); cyc = itertools.cycle(pool); shots = []
     for a, b in zip(cut_points[:-1], cut_points[1:]):
@@ -369,7 +387,8 @@ def montage_for_range(start_time, end_time, params, exclude:Optional[Set[str]]=N
         try:
             shot = subclip_sized(fp, shot_dur).set_start(a - start_time)
             shots.append(shot)
-        except Exception as e: print(f"[WARN] Ошибка при создании шотa для нарезки из '{fp}': {e}")
+        except Exception as e:
+            logger.warning("[WARN] Ошибка при создании шотa для нарезки из '%s': %s", fp, e)
     if not shots: return ColorClip(size=FINAL_RES, color=(0,0,0)).set_duration(dur)
     return CompositeVideoClip(shots, size=FINAL_RES).set_duration(dur).without_audio()
 
@@ -377,7 +396,7 @@ def render_segment_task(task_args):
     """Функция-воркер, которая рендерит один сегмент."""
     task, params, temp_dir = task_args
     task_id, task_type = task['id'], task['type']
-    print(f"  [Поток {os.getpid()}] Начинаю задачу {task_id}: {task_type}...")
+    logger.info("  [Поток %s] Начинаю задачу %s: %s...", os.getpid(), task_id, task_type)
 
     global LYRICS, HERO_ALIASES, CUSTOM_HERO_MAP, ANCHOR_TOKENS
     LYRICS = params['lyrics_data']['lyrics']
@@ -401,11 +420,10 @@ def render_segment_task(task_args):
         if clip:
             clip.write_videofile(out_path, fps=FPS, codec="libx264", audio=False, preset="ultrafast", logger=None)
             clip.close()
-            print(f"  [Поток {os.getpid()}] Задача {task_id} ({task_type}) завершена.")
+            logger.info("  [Поток %s] Задача %s (%s) завершена.", os.getpid(), task_id, task_type)
             return out_path
     except Exception:
-        import traceback
-        traceback.print_exc()
+        logger.exception("Ошибка при выполнении задачи %s (%s)", task_id, task_type)
         try:
             err_clip = TextClip(f"ERROR Task {task['id']}", fontsize=50, color='red', size=FINAL_RES).set_duration(task['end'] - task['start'])
             err_clip.write_videofile(out_path, fps=FPS, codec="libx264", audio=False, preset="ultrafast", logger=None)
@@ -445,7 +463,7 @@ def build_video(params, app_instance):
     temp_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "temp_montage")
     if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
     os.makedirs(temp_dir, exist_ok=True)
-    print(f"Временные файлы будут создаваться в: {temp_dir}")
+    logger.info("Временные файлы будут создаваться в: %s", temp_dir)
 
     params['intervals'] = intervals; params['hyp_words'] = hyp_words; params['beats'] = beats
     params['lyrics_data'] = {'lyrics': LYRICS, 'aliases': HERO_ALIASES}
@@ -484,7 +502,7 @@ def build_video(params, app_instance):
     try:
         shutil.rmtree(temp_dir)
     except Exception as e:
-        print(f"Не удалось удалить временную папку {temp_dir}: {e}")
+        logger.warning("Не удалось удалить временную папку %s: %s", temp_dir, e)
 
 class App(ctk.CTk):
     def __init__(self):
@@ -639,10 +657,16 @@ class App(ctk.CTk):
     def run_tasks(self, tasks, params):
         self.after(0, self._toggle_ui, False)
         total_tasks = len(tasks)
-        print("\n" + "="*50 + f"\nНАЧИНАЮ РАБОТУ: {total_tasks} видео в очереди.\n" + "="*50 + "\n")
-        
+        logger.info("\n%s\nНАЧИНАЮ РАБОТУ: %s видео в очереди.\n%s\n", "=" * 50, total_tasks, "=" * 50)
+
         for i, task in enumerate(tasks):
-            print(f"\n--- Видео {i+1}/{total_tasks} (Файл: {os.path.basename(task['audio_path'])}, Стиль: {task['style']}) ---\n")
+            logger.info(
+                "\n--- Видео %s/%s (Файл: %s, Стиль: %s) ---\n",
+                i + 1,
+                total_tasks,
+                os.path.basename(task['audio_path']),
+                task['style'],
+            )
             self.after(0, self.update_status, f"Видео {i+1}/{total_tasks}: {os.path.basename(task['audio_path'])} ({task['style']})")
             self.after(0, self.update_progress, 0)
             try:
@@ -662,13 +686,14 @@ class App(ctk.CTk):
                 task_params['out_path'] = out_path
                 build_video(task_params, self)
             except Exception as e:
-                import traceback
-                from tkinter import messagebox
-                traceback.print_exc()
+                logger.exception(
+                    "Произошла ошибка при создании видео для стиля '%s'",
+                    task['style'],
+                )
                 self.after(0, lambda e=e, s=task['style']: messagebox.showerror("Критическая ошибка", f"Произошла ошибка при создании видео для стиля '{s}':\n\n{e}"))
                 break
-        
-        print("\n" + "="*50 + "\nВСЕ ЗАДАЧИ ВЫПОЛНЕНЫ.\n" + "="*50 + "\n")
+
+        logger.info("\n%s\nВСЕ ЗАДАЧИ ВЫПОЛНЕНЫ.\n%s\n", "=" * 50, "=" * 50)
         self.after(0, self.update_status, "Готово!")
         self.after(0, self._toggle_ui, True)
         self.after(0, lambda: messagebox.showinfo("Завершено", "Все задачи по созданию видео выполнены."))
