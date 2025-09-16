@@ -3,7 +3,7 @@
 # 1. Исправлена последняя ошибка NameError с messagebox при завершении работы.
 # 2. Сохранена вся рабочая логика многопоточного рендера и нового GUI.
 
-import os, re, random, tempfile, subprocess, json, hashlib, threading, itertools
+import os, re, random, tempfile, subprocess, json, hashlib, threading, itertools, logging
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Set
 from difflib import SequenceMatcher
@@ -79,7 +79,15 @@ class LineInterval: idx:int; start:float; end:float; hits:int
 def make_vocals_only(input_audio:str)->str:
     tmp = os.path.join(tempfile.gettempdir(), "vocals_for_asr.wav")
     cmd = ["ffmpeg","-y","-i", input_audio, "-af","highpass=f=120, lowpass=f=8500, afftdn=nf=-25, dynaudnorm=f=150:g=10", "-ac","1","-ar","16000", tmp]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode != 0:
+        err_msg = result.stderr.decode("utf-8", errors="ignore").strip()
+        logging.warning(
+            "ffmpeg failed to create vocals-only audio (code %s): %s",
+            result.returncode,
+            err_msg or "no error message",
+        )
+        return input_audio
     return tmp if os.path.exists(tmp) else input_audio
 
 def _hash(path:str)->str:
